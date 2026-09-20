@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" width="860" height="300" font-family="ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#10b981"/>
+    </marker>
+    <style>
+      .card  { fill: none; stroke: #10b981; stroke-width: 1.5; rx: 10; }
+      .soft  { fill: #10b981; fill-opacity: .07; stroke: none; rx: 10; }
+      .title { fill: #047857; font-size: 13px; font-weight: 600; }
+      .code  { fill: #6b7280; font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .token { fill: #059669; font-size: 11.5px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .step  { fill: #047857; font-size: 12px; font-weight: 600; }
+      .note  { fill: #6b7280; font-size: 11px; }
+      .flow  { stroke: #10b981; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <!-- Confluence page, before -->
+  <rect class="soft" x="10" y="60" width="240" height="150"/>
+  <rect class="card" x="10" y="60" width="240" height="150"/>
+  <text class="title" x="26" y="84">Confluence page</text>
+  <text class="code" x="26" y="108">&lt;h1&gt;Onboarding&lt;/h1&gt;</text>
+  <text class="token" x="26" y="128">&lt;ac:structured-macro</text>
+  <text class="token" x="26" y="144">   ac:name="warning"&gt;</text>
+  <text class="code" x="26" y="164">&lt;p&gt;Plain text.&lt;/p&gt;</text>
+  <text class="code" x="26" y="184">&lt;table&gt;…&lt;/table&gt;</text>
+
+  <!-- Markdown, middle -->
+  <rect class="soft" x="310" y="60" width="240" height="150"/>
+  <rect class="card" x="310" y="60" width="240" height="150"/>
+  <text class="title" x="326" y="84">Markdown you edit</text>
+  <text class="code" x="326" y="108"># Onboarding</text>
+  <text class="token" x="326" y="132">⟦macro.warning#1⟧</text>
+  <text class="code" x="326" y="156">Plain text.</text>
+  <text class="code" x="326" y="176">| Term | Definition |</text>
+  <text class="note" x="326" y="198">marker: move it, never rewrite it</text>
+
+  <!-- Confluence page, after -->
+  <rect class="soft" x="610" y="60" width="240" height="150"/>
+  <rect class="card" x="610" y="60" width="240" height="150"/>
+  <text class="title" x="626" y="84">Published back</text>
+  <text class="code" x="626" y="108">&lt;h1&gt;Onboarding&lt;/h1&gt;</text>
+  <text class="token" x="626" y="128">&lt;ac:structured-macro</text>
+  <text class="token" x="626" y="144">   ac:name="warning"&gt;</text>
+  <text class="code" x="626" y="164">&lt;p&gt;Plain text.&lt;/p&gt;</text>
+  <text class="note" x="626" y="188">byte for byte, untouched</text>
+
+  <!-- arrows -->
+  <path class="flow" d="M258 135 L302 135"/>
+  <text class="step" x="262" y="126">pull</text>
+
+  <path class="flow" d="M558 135 L602 135"/>
+  <text class="step" x="562" y="126">push</text>
+
+  <!-- footer note -->
+  <text class="note" x="10" y="248">Anything Markdown cannot express is lifted out before parsing and restored afterwards,</text>
+  <text class="note" x="10" y="266">so macros, layouts, attachments and status lozenges survive a full round trip.</text>
+  <text class="note" x="10" y="284">push refuses when the page moved on since the pull, or when a marker went missing.</text>
+</svg>
