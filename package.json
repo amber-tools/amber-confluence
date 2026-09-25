@@ -1,6 +1,6 @@
 {
   "name": "amber-confluence",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "description": "Edit self-hosted Confluence Data Center pages as Markdown. Macros, anchors and layouts stay intact.",
   "keywords": [
     "confluence",

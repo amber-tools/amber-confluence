@@ -31,7 +31,7 @@ $ amber confluence push 100000001        # publish it back
 Your macros, panels, attachments and layouts survive all of that untouched.
 
 <p align="center">
-  <img src="docs/roundtrip.svg" alt="A page is pulled to Markdown with markers standing in for macros, edited, and pushed back with the macros restored byte for byte" width="100%">
+  <img src="https://raw.githubusercontent.com/amber-tools/amber-confluence/main/docs/roundtrip.svg" alt="A page is pulled to Markdown with markers standing in for macros, edited, and pushed back with the macros restored byte for byte" width="100%">
 </p>
 
 ---
