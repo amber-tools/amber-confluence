@@ -1,6 +1,7 @@
 <h1 align="center">amber-confluence</h1>
 
 <p align="center">
+  <a href="https://amber.pm"><b>amber.pm</b></a><br><br>
   <b>Edit self-hosted Confluence pages as Markdown.</b><br>
   Macros, layouts and attachments come back untouched.
 </p>

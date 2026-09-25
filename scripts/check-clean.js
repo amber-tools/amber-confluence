@@ -29,6 +29,8 @@ const ALLOWED_HOSTS = [
   "atlassian.com", "developer.atlassian.com", "confluence.atlassian.com",
   "opensource.org", "modelcontextprotocol.io", "nodejs.org",
   "img.shields.io",
+  /* this project's own site */
+  "amber.pm",
 ];
 
 const RULES = [

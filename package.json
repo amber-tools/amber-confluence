@@ -34,5 +34,6 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amber-tools/amber-confluence.git"
-  }
+  },
+  "homepage": "https://amber.pm"
 }
