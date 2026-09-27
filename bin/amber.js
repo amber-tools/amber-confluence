@@ -55,31 +55,120 @@ function parseArgs(argv) {
   return out;
 }
 
-/* Line diff via the usual longest-common-subsequence table. Page-sized
- * inputs make the quadratic cost irrelevant, and it keeps the tool free
- * of a dependency for something this small. */
-function diffLines(before, after) {
-  const a = before.split("\n");
-  const b = after.split("\n");
-  const n = a.length, m = b.length;
+/* Line diff.
+ *
+ * A plain longest-common-subsequence table is quadratic, and wiki pages get
+ * long: six thousand lines cost a second and a quarter of a gigabyte, twenty
+ * thousand cost minutes. Almost none of that work is useful, because a real
+ * edit touches a handful of lines in a page that is otherwise identical.
+ *
+ * So the work is cut down before any table is built. Identical head and tail
+ * are matched directly. What remains is split at lines that occur exactly
+ * once on each side — they can only correspond to each other, so they are
+ * safe anchors. Only the small regions between anchors reach the table, and
+ * a region too large even then is reported as a whole block rather than
+ * spending minutes to say the same thing in more detail.
+ */
 
-  const lcs = [];
-  for (let i = 0; i <= n; i++) lcs.push(new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
+var LCS_CELL_LIMIT = 4e6;
+
+function lcsDiff(a, b, out) {
+  var n = a.length, m = b.length;
+
+  var lcs = [];
+  for (var i = 0; i <= n; i++) lcs.push(new Int32Array(m + 1));
+  for (var i = n - 1; i >= 0; i--) {
+    for (var j = m - 1; j >= 0; j--) {
       lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
     }
   }
 
-  const out = [];
-  let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { out.push({ kind: " ", text: a[i] }); i++; j++; }
-    else if (lcs[i + 1][j] >= lcs[i][j + 1]) { out.push({ kind: "-", text: a[i] }); i++; }
-    else { out.push({ kind: "+", text: b[j] }); j++; }
+  var x = 0, y = 0;
+  while (x < n && y < m) {
+    if (a[x] === b[y]) { out.push({ kind: " ", text: a[x] }); x++; y++; }
+    else if (lcs[x + 1][y] >= lcs[x][y + 1]) { out.push({ kind: "-", text: a[x] }); x++; }
+    else { out.push({ kind: "+", text: b[y] }); y++; }
   }
-  while (i < n) out.push({ kind: "-", text: a[i++] });
-  while (j < m) out.push({ kind: "+", text: b[j++] });
+  while (x < n) out.push({ kind: "-", text: a[x++] });
+  while (y < m) out.push({ kind: "+", text: b[y++] });
+}
+
+/* Lines appearing exactly once in both halves, in an order both agree on. */
+function anchors(a, b) {
+  function countOf(lines) {
+    var c = Object.create(null);
+    lines.forEach(function (l) { c[l] = (c[l] || 0) + 1; });
+    return c;
+  }
+  var ca = countOf(a), cb = countOf(b);
+
+  var indexInB = Object.create(null);
+  b.forEach(function (l, j) { if (cb[l] === 1) indexInB[l] = j; });
+
+  var pairs = [];
+  a.forEach(function (l, i) {
+    if (ca[l] === 1 && cb[l] === 1) pairs.push([i, indexInB[l]]);
+  });
+
+  /* Longest run whose positions rise on both sides. */
+  var tails = [], link = [], best = [];
+  pairs.forEach(function (pair, k) {
+    var lo = 0, hi = tails.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (best[tails[mid]][1] < pair[1]) lo = mid + 1; else hi = mid;
+    }
+    best[k] = pair;
+    link[k] = lo > 0 ? tails[lo - 1] : -1;
+    tails[lo] = k;
+  });
+
+  var chain = [];
+  for (var k = tails.length ? tails[tails.length - 1] : -1; k !== -1 && k !== undefined; k = link[k]) {
+    chain.push(best[k]);
+  }
+  return chain.reverse();
+}
+
+function diffRegion(a, b, out) {
+  if (!a.length && !b.length) return;
+  if (!a.length) { b.forEach(function (l) { out.push({ kind: "+", text: l }); }); return; }
+  if (!b.length) { a.forEach(function (l) { out.push({ kind: "-", text: l }); }); return; }
+
+  if (a.length * b.length <= LCS_CELL_LIMIT) return lcsDiff(a, b, out);
+
+  var found = anchors(a, b);
+  if (!found.length) {
+    a.forEach(function (l) { out.push({ kind: "-", text: l }); });
+    b.forEach(function (l) { out.push({ kind: "+", text: l }); });
+    return;
+  }
+
+  var x = 0, y = 0;
+  found.forEach(function (pair) {
+    diffRegion(a.slice(x, pair[0]), b.slice(y, pair[1]), out);
+    out.push({ kind: " ", text: a[pair[0]] });
+    x = pair[0] + 1;
+    y = pair[1] + 1;
+  });
+  diffRegion(a.slice(x), b.slice(y), out);
+}
+
+function diffLines(before, after) {
+  var a = before.split("\n");
+  var b = after.split("\n");
+  var out = [];
+
+  var head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+
+  var ta = a.length, tb = b.length;
+  while (ta > head && tb > head && a[ta - 1] === b[tb - 1]) { ta--; tb--; }
+
+  for (var i = 0; i < head; i++) out.push({ kind: " ", text: a[i] });
+  diffRegion(a.slice(head, ta), b.slice(head, tb), out);
+  for (var j = ta; j < a.length; j++) out.push({ kind: " ", text: a[j] });
+
   return out;
 }
 
@@ -228,6 +317,12 @@ async function main() {
   if (result.removedMacros) console.log("Forced: " + result.removedMacros + " opaque block(s) removed from the page.");
 }
 
-main().catch(function (e) {
-  fail(e && e.message ? e.message : String(e));
-});
+/* Run as a command; required as a module by the tests, which exercise the
+ * diff directly rather than through a Confluence instance. */
+if (require.main === module) {
+  main().catch(function (e) {
+    fail(e && e.message ? e.message : String(e));
+  });
+}
+
+module.exports = { diffLines: diffLines, renderDiff: renderDiff, parseArgs: parseArgs };

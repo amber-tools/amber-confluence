@@ -19,10 +19,29 @@
 
   // Tokens must be unlikely to occur in prose, stable across editing, and
   // legible enough that a human moving one knows what they are moving.
-  var TOKEN_RE = /⟦([A-Za-z0-9._-]+)#(\d+)⟧/g;
+  var TOKEN_RE = /⟦([A-Za-z0-9._-]+)#(\d+)(?:~([a-z0-9]{3,8}))?⟧/g;
 
-  function makeToken(label, n) {
-    return "⟦" + label + "#" + n + "⟧";
+  function makeToken(label, n, nonce) {
+    return "⟦" + label + "#" + n + (nonce ? "~" + nonce : "") + "⟧";
+  }
+
+  /* A page may legitimately contain text shaped like a marker — a page that
+   * documents this very notation, for instance. Without a distinguishing
+   * suffix that text would be mistaken for a marker on the way back and
+   * silently turned into a second copy of the macro.
+   *
+   * So when, and only when, the page already carries marker-shaped text,
+   * every marker for that page gets a short suffix the page does not
+   * contain. Ordinary pages keep the plain, readable form. */
+  function nonceFor(storage) {
+    if (!new RegExp(TOKEN_RE.source).test(storage)) return "";
+    for (var attempt = 0; attempt < 50; attempt++) {
+      var candidate = Math.random().toString(36).slice(2, 6);
+      if (candidate.length === 4 && storage.indexOf("~" + candidate + "⟧") === -1) {
+        return candidate;
+      }
+    }
+    return "x" + Date.now().toString(36).slice(-5);
   }
 
   // Names whose subtrees are lifted out whole.
@@ -55,6 +74,7 @@
     var out = "";
     var macros = [];
     var counters = Object.create(null);
+    var nonce = nonceFor(storage);
     var i = 0;
     var n = storage.length;
 
@@ -99,7 +119,7 @@
 
       var label = macroLabel(tag.name, region);
       counters[label] = (counters[label] || 0) + 1;
-      var token = makeToken(label, counters[label]);
+      var token = makeToken(label, counters[label], nonce);
       macros.push({ token: token, xml: region, label: label });
       out += token;
     }

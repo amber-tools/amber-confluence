@@ -239,6 +239,31 @@ const JIRA_MACRO =
   has("back: cjk", back, "\u6587\u66f8\u30c6\u30b9\u30c8");
 }
 
+/* ---------------- 13. text that looks like a marker ----------------
+ * A page may document this very notation, or quote a marker from another
+ * page. Before this was handled, such text was mistaken for a marker on the
+ * way back and silently became a second copy of the macro. */
+{
+  const storage =
+    "<h1>Notation</h1>" +
+    "<p>We write \u27E6macro.info#1\u27E7 to mean a placeholder.</p>" +
+    INFO_MACRO;
+
+  const { markdown, macros } = C.toMarkdown(storage);
+  eq("one macro lifted", macros.length, 1);
+  ok("its marker is distinguished from the prose",
+     macros[0].token !== "\u27E6macro.info#1\u27E7", macros[0].token);
+
+  const back = C.toStorage(markdown, macros);
+  eq("the macro is emitted once, not twice", back.split('ac:name="info"').length - 1, 1);
+  has("the prose survives untouched", back, "\u27E6macro.info#1\u27E7 to mean a placeholder");
+  eq("nothing reported missing", C.missingMacros(markdown, macros).length, 0);
+
+  /* An ordinary page keeps the short, readable marker. */
+  const plain = C.toMarkdown("<p>before</p>" + INFO_MACRO);
+  eq("ordinary pages keep the plain marker", plain.macros[0].token, "\u27E6macro.info#1\u27E7");
+}
+
 /* ---------------- report ---------------- */
 console.log("");
 if (fails.length) {
