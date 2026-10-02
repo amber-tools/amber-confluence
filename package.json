@@ -1,6 +1,6 @@
 {
   "name": "amber-confluence",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Edit self-hosted Confluence Data Center pages as Markdown. Macros, anchors and layouts stay intact.",
   "keywords": [
     "confluence",
@@ -21,7 +21,8 @@
     "bin/",
     "src/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "node test/converter.test.js && node test/roundtrip.test.js && node test/config.test.js && node test/client.test.js && node test/store.test.js && node test/diff.test.js && node test/quirks.test.js && node test/doctor.test.js && node test/mcp.test.js && node test/e2e.test.js && node scripts/check-clean.js",

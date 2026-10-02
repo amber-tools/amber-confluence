@@ -43,6 +43,8 @@ Your macros, panels, attachments and layouts survive all of that untouched.
 - [How macros survive](#how-macros-survive)
 - [When it says no](#when-it-says-no)
 - [Use it from an agent](#use-it-from-an-agent)
+- [Check your instance first](#check-your-instance-first) · [Company certificates, slow proxies](#company-certificates-slow-proxies)
+- [What has been tested, and what has not](#what-has-been-tested-and-what-has-not)
 - [What it cannot do yet](#what-it-cannot-do-yet) · [Troubleshooting](#troubleshooting)
 
 ---
@@ -103,6 +105,7 @@ Onboarding  (v12, space DEMO)
 | `amber confluence diff <page>` | shows what publishing would change |
 | `amber confluence push <page>` | publishes your edits |
 | `amber confluence status [page]` | tells you which copies went out of date |
+| `amber confluence doctor [page]` | checks that everything works here, without writing |
 
 `<page>` is a page id or any Confluence URL containing one. Add `-m "why"` to `push`
 to leave a comment in the page history, and `--json` to any command to get output a
@@ -168,6 +171,10 @@ disappear from the page. The message names every block that went.
 
 Both can be overridden with `--force` when you actually mean it.
 
+And when nothing changed, nothing is sent: pushing a page you did not edit adds no
+version to its history. A newline your editor appended on save, or Windows line
+endings, do not count as an edit.
+
 ## Use it from an agent
 
 The MCP server exposes the same four operations, with the same refusals. For Claude
@@ -197,14 +204,64 @@ Desktop, Claude Code, or any other MCP client:
 Refusals reach the agent as readable text rather than as errors, so it can pull again
 or put a marker back instead of giving up.
 
+## Check your instance first
+
+```console
+$ amber confluence doctor 100000001
+  ✓ Node v22.15.0
+  ✓ Configuration read, signing in with personal access token
+  ✓ Trusting the system store
+  ✓ Reached Confluence 8.5.4 in 41 ms
+  ✓ Signed in as John Doe
+  ✓ Page converts there and back byte for byte (3 opaque block(s))
+
+All good.
+```
+
+The doctor never writes. It checks the certificate, the version, whether your
+credential fits that version, the sign-in, and converts one page there and back in
+memory. `--share` prints the same report without the host, the account or any page
+content, safe to paste into an issue.
+
+## Company certificates, slow proxies
+
+Self-hosted Confluence usually sits behind a certificate your company issued itself.
+The tool trusts the operating system's certificate store as well as Node's own list,
+so if your browser opens the wiki without a warning, this usually does too. If not:
+
+```toml
+[confluence]
+url     = "https://wiki.example.com"
+ca_file = "/path/to/company-root-ca.pem"
+timeout = 120          # seconds; the default is 30
+```
+
+Certificate checks are never switched off.
+
+## What has been tested, and what has not
+
+Round trips on real pages from public self-hosted instances, read only:
+
+| Instance | Pages | Unedited page, byte for byte | After an edit, every untouched block verbatim |
+|---|---|---|---|
+| Confluence 9.2.21 | 36 | 36 | 36 |
+| Confluence 10.2.18 | 40 | 40 | 40 |
+
+Against a stand-in instance that misbehaves on purpose: a context path behind a
+reverse proxy, compressed responses, rate limiting, single sign-on in front, a CAPTCHA
+lock, a self-signed certificate, `http://` redirecting to `https://`, a server that
+never answers, and error messages in another language. Each of these failed or
+misled before it was fixed, and each is now a test.
+
+Not tested yet: publishing to a real instance, Confluence 7.x and 8.x on real
+servers, and Windows. If you run any of these, `amber confluence doctor --share`
+is the most useful thing you can send.
+
 ## What it cannot do yet
 
-Version 0.1 does one thing properly: a single page, out and back.
-
-Not yet here: pulling a tree of pages, uploading or replacing attachments, creating
-new pages. Confluence Cloud is out of scope — Atlassian's own tooling covers it.
-
-Tested against Confluence Server and Data Center 7.x.
+A single page, out and back. Not yet here: pulling a tree of pages, uploading or
+replacing attachments, creating new pages. Confluence Cloud is out of scope —
+Atlassian's own tooling covers it.
 
 ## Troubleshooting
 
