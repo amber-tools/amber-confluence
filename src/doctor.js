@@ -162,21 +162,28 @@ async function runDoctor(options) {
   } else {
     try {
       const page = await client.pull(o.pageRef);
-      const back = C.toStorage(page.markdown, page.macros);
+      const back = C.toStorage(page.markdown, page.macros, page.layout);
       const intact = page.macros.filter(function (m) { return back.indexOf(m.xml) !== -1; }).length;
+      const identical = typeof page.source === "string" && back === page.source;
       const kinds = Array.from(new Set(page.macros.map(function (m) { return m.label; }))).sort();
 
       facts.page = {
         opaqueBlocks: page.macros.length,
         intact: intact,
+        identical: identical,
         kinds: kinds,
       };
 
-      if (intact === page.macros.length) {
+      if (intact === page.macros.length && identical) {
         add("page", OK,
-          "Page converts there and back: " + page.macros.length + " opaque block(s), all intact",
+          "Page converts there and back byte for byte (" + page.macros.length + " opaque block(s))",
           kinds.length ? "Kinds: " + kinds.join(", ") : null,
-          "Page round trip: " + page.macros.length + " block(s), all intact" + (kinds.length ? " (" + kinds.join(", ") + ")" : ""));
+          "Page round trip: byte for byte, " + page.macros.length + " block(s)" + (kinds.length ? " (" + kinds.join(", ") + ")" : ""));
+      } else if (intact === page.macros.length) {
+        add("page", WARN,
+          "Page converts there and back with every opaque block intact, but not byte for byte",
+          "Publishing an edit may reformat parts of the page you did not touch. Please report it with --share.",
+          "Page round trip: blocks intact, page not byte for byte" + (kinds.length ? " (" + kinds.join(", ") + ")" : ""));
       } else {
         add("page", FAIL,
           "Page conversion lost " + (page.macros.length - intact) + " of " + page.macros.length + " opaque block(s)",

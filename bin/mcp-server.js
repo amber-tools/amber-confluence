@@ -13,6 +13,7 @@
 "use strict";
 
 const config = require("../src/config.js");
+const C = require("../src/converter.js");
 const { createClient } = require("../src/client.js");
 const { createStore } = require("../src/store.js");
 const { applyTrust } = require("../src/trust.js");
@@ -76,13 +77,18 @@ async function toolPush(args) {
     return "Nothing to publish: the Markdown is unchanged since the pull, so no new version was created.";
   }
 
+  /* The local copy becomes what the page now holds, with a fresh layout,
+   * so the next edit is compared against the published page rather than
+   * against the copy from before this push. */
+  const published = C.toMarkdown(result.storage);
   store.save({
     pageId: pageId,
     title: result.title,
     spaceKey: local.meta.spaceKey,
     version: result.toVersion,
-    markdown: args.markdown,
-    macros: local.meta.macros,
+    markdown: published.markdown,
+    macros: published.macros,
+    layout: published.layout,
   });
 
   const lines = [

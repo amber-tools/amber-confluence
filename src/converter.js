@@ -21,6 +21,9 @@
   // legible enough that a human moving one knows what they are moving.
   var TOKEN_RE = /⟦([A-Za-z0-9._-]+)#(\d+)(?:~([a-z0-9]{3,8}))?⟧/g;
 
+  /* A line holding nothing but one marker: the macro is a block of its own. */
+  var TOKEN_LINE = new RegExp("^\\s*(" + TOKEN_RE.source + ")\\s*$");
+
   function makeToken(label, n, nonce) {
     return "⟦" + label + "#" + n + (nonce ? "~" + nonce : "") + "⟧";
   }
@@ -94,6 +97,21 @@
         continue;
       }
 
+      if (!tag.closing && tag.name.toLowerCase() === "table") {
+        var tableEnd = findMatchingClose(storage, tag.end, tag.name);
+        if (tableEnd !== -1) {
+          var tableRegion = storage.slice(lt, tableEnd);
+          if (!tableIsPlain(tableRegion)) {
+            counters.table = (counters.table || 0) + 1;
+            var tableToken = makeToken("table", counters.table, nonce);
+            macros.push({ token: tableToken, xml: tableRegion, label: "table" });
+            out += tableToken;
+            i = tableEnd;
+            continue;
+          }
+        }
+      }
+
       if (tag.closing || !isOpaqueTag(tag.name)) {
         out += storage.slice(lt, tag.end);
         i = tag.end;
@@ -125,6 +143,84 @@
     }
 
     return { text: out, macros: macros };
+  }
+
+  /* Whether a table can be edited as a Markdown table and written back
+   * without losing anything. Markdown tables carry neither attributes nor
+   * merged cells nor block content, so the test is strict: anything that
+   * would not survive is a reason to keep the whole table as an opaque
+   * block instead. Losing a cell silently is far worse than not being able
+   * to edit a table as text.
+   *
+   * Macros inside cells are fine: they are lifted out on their own. */
+  var TABLE_PARTS = /^(tbody|thead|tr|th|td)$/;
+  var CELL_INLINE = /^(strong|b|em|i|code|s|del|u|sub|sup)$/;
+
+  function tableIsPlain(region) {
+    var width = -1, cells = 0, inCell = false, parasInCell = 0;
+    var pos = 0;
+
+    while (pos < region.length) {
+      var lt = region.indexOf("<", pos);
+      if (lt === -1) break;
+      var tag = readTag(region, lt);
+      if (!tag) { pos = lt + 1; continue; }
+      var name = tag.name.toLowerCase();
+      var hasAttrs = /^<\/?[^\s>\/]+\s+[^>]*?[^\s\/]/.test(region.slice(lt, tag.end));
+      pos = tag.end;
+
+      if (isOpaqueTag(name)) {
+        /* Skip the macro body entirely; it travels as a token. */
+        if (!tag.closing && !tag.selfClosing) {
+          var after = findMatchingClose(region, tag.end, tag.name);
+          if (after === -1) return false;
+          pos = after;
+        }
+        continue;
+      }
+
+      if (name === "table") {
+        if (tag.closing) continue;
+        if (lt !== 0) return false;          /* a table inside the table */
+        if (hasAttrs) return false;
+        continue;
+      }
+
+      if (TABLE_PARTS.test(name)) {
+        if (hasAttrs) return false;          /* colspan, rowspan, style, class */
+        if (name === "tr") {
+          if (!tag.closing) { cells = 0; }
+          else {
+            if (width === -1) width = cells;
+            else if (cells !== width) return false;   /* ragged rows */
+          }
+        } else if (name === "th" || name === "td") {
+          if (!tag.closing) { cells++; inCell = true; parasInCell = 0; }
+          else { inCell = false; }
+        }
+        continue;
+      }
+
+      if (!inCell) return false;             /* colgroup, caption, tfoot, stray markup */
+
+      if (name === "p") {
+        if (hasAttrs) return false;
+        if (!tag.closing && ++parasInCell > 1) return false;   /* two paragraphs in one cell */
+        continue;
+      }
+      if (name === "br") return false;        /* a line break inside a cell has no Markdown form */
+      if (CELL_INLINE.test(name)) { if (hasAttrs) return false; continue; }
+      if (name === "a") {
+        if (tag.closing) continue;
+        /* A link survives only if href is its sole attribute. */
+        var attrs = region.slice(lt, tag.end).replace(/^<a\s*/i, "").replace(/\/?>$/, "");
+        if (!/^href="[^"]*"\s*$/i.test(attrs)) return false;
+        continue;
+      }
+      return false;                          /* lists, nested blocks, images, spans with style */
+    }
+
+    return width > 0;
   }
 
   /* Read a tag starting at position `lt` (which must be "<").
@@ -230,21 +326,34 @@
     var stack = [rootNode];
     var i = 0;
 
-    function push(node) {
+    /* Top-level nodes remember the span of source they came from, so an
+     * untouched block can later be written back as that exact source. */
+    function push(node, start) {
+      if (stack.length === 1) node.start = start;
       stack[stack.length - 1].children.push(node);
     }
 
     while (i < text.length) {
       var lt = text.indexOf("<", i);
       if (lt === -1) {
-        if (i < text.length) push({ name: "#text", text: text.slice(i) });
+        if (i < text.length) {
+          var tail = { name: "#text", text: text.slice(i) };
+          push(tail, i);
+          if (tail.start !== undefined) tail.end = text.length;
+        }
         break;
       }
-      if (lt > i) push({ name: "#text", text: text.slice(i, lt) });
+      if (lt > i) {
+        var tx = { name: "#text", text: text.slice(i, lt) };
+        push(tx, i);
+        if (tx.start !== undefined) tx.end = lt;
+      }
 
       var tag = readTag(text, lt);
       if (!tag) {
-        push({ name: "#text", text: "<" });
+        var lone = { name: "#text", text: "<" };
+        push(lone, lt);
+        if (lone.start !== undefined) lone.end = lt + 1;
         i = lt + 1;
         continue;
       }
@@ -259,6 +368,7 @@
       if (tag.closing) {
         for (var k = stack.length - 1; k > 0; k--) {
           if (stack[k].name === lname) {
+            if (k === 1) stack[1].end = tag.end;
             stack.length = k;
             break;
           }
@@ -272,9 +382,19 @@
         raw: text.slice(lt, tag.end),
         children: [],
       };
-      push(node);
+      var atRoot = stack.length === 1;
+      push(node, lt);
       if (!tag.selfClosing && !VOID[lname]) stack.push(node);
+      else if (atRoot) node.end = tag.end;
       i = tag.end;
+    }
+
+    /* Elements left open run to where the next top-level node begins. */
+    var kids = rootNode.children;
+    for (var c = 0; c < kids.length; c++) {
+      if (kids[c].end === undefined) {
+        kids[c].end = c + 1 < kids.length ? kids[c + 1].start : text.length;
+      }
     }
     return rootNode;
   }
@@ -496,8 +616,10 @@
         }
         case "table": {
           if (!tableIsSimple(nd)) {
-            out.push("<!-- table kept as-is -->");
-            return;
+            /* Unreachable: tables that cannot round-trip are lifted out whole
+             * in extractOpaque. If one ever gets here, stop rather than
+             * write a placeholder over somebody's table. */
+            throw new Error("Internal: a table reached Markdown conversion that cannot be written back. Please report this page's structure.");
           }
           var rs = rows(nd);
           if (!rs.length) return;
@@ -538,9 +660,24 @@
   function toMarkdown(storage) {
     var ex = extractOpaque(String(storage == null ? "" : storage));
     var tree = parseTree(ex.text);
-    var md = blocksToMd(tree.children).join("\n\n");
-    md = md.replace(/\n{3,}/g, "\n\n").trim();
-    return { markdown: md, macros: ex.macros };
+
+    /* Each block keeps the source it came from, including any whitespace or
+     * empty markup in front of it, so that writing every block back as its
+     * source reproduces the page exactly. */
+    var blocks = [];
+    var cursor = 0;
+    tree.children.forEach(function (nd) {
+      var md = blocksToMd([nd]).join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+      if (!md) return;
+      blocks.push({ md: md, src: ex.text.slice(cursor, nd.end) });
+      cursor = nd.end;
+    });
+
+    return {
+      markdown: blocks.map(function (b) { return b.md; }).join("\n\n"),
+      macros: ex.macros,
+      layout: { blocks: blocks, tail: ex.text.slice(cursor) },
+    };
   }
 
   /* ------------------------------------------------------------------ *
@@ -634,7 +771,7 @@
     return { html: html, i: i };
   }
 
-  function toStorage(markdown, macros) {
+  function renderMarkdown(markdown, macros) {
     var byToken = Object.create(null);
     (macros || []).forEach(function (m) { byToken[m.token] = m.xml; });
 
@@ -650,7 +787,7 @@
       if (/^\s*$/.test(line)) { i++; continue; }
 
       // A line that is nothing but a token: emit the macro as a block.
-      var solo = /^\s*(⟦[A-Za-z0-9._-]+#\d+⟧)\s*$/.exec(line);
+      var solo = TOKEN_LINE.exec(line);
       if (solo) {
         out.push(byToken[solo[1]] !== undefined ? byToken[solo[1]] : "");
         i++;
@@ -729,7 +866,7 @@
         !/^\s*\d+\.\s+/.test(lines[i]) &&
         !/^\s*>\s?/.test(lines[i]) &&
         !/^```/.test(lines[i]) &&
-        !/^\s*⟦[A-Za-z0-9._-]+#\d+⟧\s*$/.test(lines[i])
+        !TOKEN_LINE.test(lines[i])
       ) {
         para.push(lines[i]);
         i++;
@@ -743,6 +880,62 @@
       return byToken[m] !== undefined ? byToken[m] : m;
     });
     return joined;
+  }
+
+  /* Where a block from the pull still stands, unchanged, in the edited
+   * Markdown: on its own, with a blank line or an edge on either side, so
+   * that a block is never matched inside a paragraph that quotes it. */
+  function findBlock(md, blockMd, from) {
+    var at = md.indexOf(blockMd, from);
+    while (at !== -1) {
+      var end = at + blockMd.length;
+      var before = at === 0 || /\n[ \t]*\n[ \t]*$/.test(md.slice(Math.max(0, at - 64), at));
+      var after = end === md.length || /^[ \t]*\n[ \t]*\n/.test(md.slice(end, end + 64)) ||
+                  /^\s*$/.test(md.slice(end));
+      if (before && after) return at;
+      at = md.indexOf(blockMd, at + 1);
+    }
+    return -1;
+  }
+
+  /* Markdown back to storage.
+   *
+   * With the layout recorded at pull time, every block the person did not
+   * touch is written back as the exact source it came from — line breaks,
+   * colours, link classes and all — and only the blocks that changed are
+   * rendered from Markdown. An unedited page comes back byte for byte.
+   *
+   * Without a layout (a copy pulled by an older version) every block is
+   * rendered, as before. */
+  function toStorage(markdown, macros, layout) {
+    if (!layout || !layout.blocks) return renderMarkdown(markdown, macros);
+
+    var byToken = Object.create(null);
+    (macros || []).forEach(function (m) { byToken[m.token] = m.xml; });
+    function restore(s) {
+      return String(s).replace(TOKEN_RE, function (m) {
+        return byToken[m] !== undefined ? byToken[m] : m;
+      });
+    }
+
+    var md = String(markdown == null ? "" : markdown).replace(/\r\n?/g, "\n");
+    var pieces = [];
+    var pos = 0;
+
+    layout.blocks.forEach(function (b) {
+      var at = findBlock(md, b.md, pos);
+      if (at === -1) return;                 /* edited or deleted */
+      var gap = md.slice(pos, at);
+      if (gap.trim()) pieces.push(renderMarkdown(gap, macros));
+      pieces.push(restore(b.src));
+      pos = at + b.md.length;
+    });
+
+    var rest = md.slice(pos);
+    if (rest.trim()) pieces.push(renderMarkdown(rest, macros));
+    pieces.push(restore(layout.tail || ""));
+
+    return pieces.join("");
   }
 
   /* ------------------------------------------------------------------ *

@@ -98,7 +98,7 @@ function createStore(dir) {
     fs.writeFileSync(mdPath(page.pageId), formatHeader(meta) + page.markdown, "utf8");
     fs.writeFileSync(
       macroPath(page.pageId),
-      JSON.stringify({ pageId: page.pageId, macros: page.macros || [] }, null, 2),
+      JSON.stringify({ pageId: page.pageId, macros: page.macros || [], layout: page.layout || null }, null, 2),
       "utf8"
     );
 
@@ -120,12 +120,14 @@ function createStore(dir) {
     }
 
     const sidecar = macroPath(pageId);
-    const macros = fs.existsSync(sidecar)
-      ? JSON.parse(fs.readFileSync(sidecar, "utf8")).macros || []
-      : [];
+    const side = fs.existsSync(sidecar) ? JSON.parse(fs.readFileSync(sidecar, "utf8")) : {};
+    const macros = side.macros || [];
+    /* Copies pulled before layouts existed have none; push then renders
+     * every block, as it used to. */
+    const layout = side.layout || null;
 
     return {
-      meta: Object.assign({}, parsed.meta, { macros: macros }),
+      meta: Object.assign({}, parsed.meta, { macros: macros, layout: layout }),
       markdown: parsed.markdown,
       markdownFile: file,
     };

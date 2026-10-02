@@ -264,6 +264,132 @@ const JIRA_MACRO =
   eq("ordinary pages keep the plain marker", plain.macros[0].token, "\u27E6macro.info#1\u27E7");
 }
 
+/* ---------------- 14. tables that Markdown cannot carry ----------------
+ * Two of these once lost data on publish: a merged header cell made the
+ * row lose its second cell, and a table with a list in a cell was replaced
+ * by a visible placeholder. Any table that would not survive is now kept
+ * whole, like a macro; plain ones stay editable. */
+{
+  const TABLES = {
+    "list in a cell":
+      "<table><tbody><tr><th>Step</th><th>Details</th></tr>" +
+      "<tr><td>1</td><td><ul><li><p>one</p></li><li><p>two</p></li></ul></td></tr></tbody></table>",
+    "merged header":
+      '<table><tbody><tr><th colspan="2">Merged</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>',
+    "row span":
+      '<table><tbody><tr><td rowspan="2">x</td><td>a</td></tr><tr><td>b</td></tr></tbody></table>',
+    "Confluence 7 default markup":
+      '<table class="wrapped"><colgroup><col /><col /></colgroup>' +
+      "<tbody><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></tbody></table>",
+    "ragged rows":
+      "<table><tbody><tr><th>A</th><th>B</th></tr><tr><td>1</td></tr></tbody></table>",
+    "two paragraphs in a cell":
+      "<table><tbody><tr><th>A</th></tr><tr><td><p>one</p><p>two</p></td></tr></tbody></table>",
+    "line break in a cell":
+      "<table><tbody><tr><th>A</th></tr><tr><td>one<br />two</td></tr></tbody></table>",
+    "coloured text":
+      '<table><tbody><tr><th>A</th></tr><tr><td><span style="color: red;">late</span></td></tr></tbody></table>',
+    "nested table":
+      "<table><tbody><tr><th>A</th></tr><tr><td><table><tbody><tr><td>in</td></tr></tbody></table></td></tr></tbody></table>",
+  };
+
+  Object.keys(TABLES).forEach(function (name) {
+    const table = TABLES[name];
+    const storage = "<p>before</p>" + table + "<p>after</p>";
+    const r = C.toMarkdown(storage);
+    ok(name + ": kept whole", r.macros.some(function (m) { return m.label === "table" && m.xml === table; }),
+       r.macros.map(function (m) { return m.label; }).join(","));
+    ok(name + ": no placeholder text", r.markdown.indexOf("kept as-is") === -1, r.markdown);
+
+    /* The real test: someone edits a different paragraph and publishes. */
+    const edited = r.markdown.replace("after", "after, edited");
+    const back = C.toStorage(edited, r.macros);
+    has(name + ": table byte for byte after an edit elsewhere", back, table);
+    has(name + ": the edit landed", back, "after, edited");
+  });
+
+  /* Plain tables remain editable as Markdown. */
+  const plain = "<table><tbody><tr><th>Term</th><th>Definition</th></tr>" +
+                "<tr><td>PII</td><td><strong>Personal</strong> data</td></tr></tbody></table>";
+  const pr = C.toMarkdown(plain);
+  ok("plain table: editable as Markdown", !pr.macros.some(function (m) { return m.label === "table"; }));
+  has("plain table: rendered as a Markdown table", pr.markdown, "| Term | Definition |");
+
+  const withStatus = "<table><tbody><tr><th>Task</th><th>Status</th></tr><tr><td>UC1</td><td>" +
+                     STATUS_MACRO + "</td></tr></tbody></table>";
+  const sr = C.toMarkdown(withStatus);
+  ok("plain table with a macro in a cell: still editable",
+     !sr.macros.some(function (m) { return m.label === "table"; }), sr.markdown);
+  has("plain table with a macro in a cell: macro restored", C.toStorage(sr.markdown, sr.macros), STATUS_MACRO);
+}
+
+/* ---------------- 15. what you did not touch, you get back ----------------
+ * Measured on 36 real pages from a public Confluence 9.2 instance: without
+ * a layout only 3 came back byte for byte, and line breaks, colours and link
+ * classes were lost on any edit. With it, every untouched block is written
+ * back as its own source. */
+{
+  const RICH =
+    "<h1>Release notes</h1>\n\n" +
+    "<p>First line<br />second line</p>\n" +
+    '<p><span style="color: rgb(255,0,0);">Late</span> and <a class="external-link" href="https://example.com" rel="nofollow">linked</a>.</p>\n' +
+    "<p></p>\n" +
+    "<p>Plain paragraph.</p>\n" +
+    "<hr />\n" +
+    "<p>Between rules.</p>\n" +
+    "<hr />\n" +
+    INFO_MACRO + "\n" +
+    "<table><tbody><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></tbody></table>\n" +
+    "<p>Closing &quot;quoted&quot; words.</p>\n";
+
+  const r = C.toMarkdown(RICH);
+  ok("layout: recorded", r.layout && Array.isArray(r.layout.blocks) && r.layout.blocks.length > 0);
+  eq("layout: markdown is the blocks joined", r.markdown, r.layout.blocks.map(function (b) { return b.md; }).join("\n\n"));
+
+  eq("untouched: whole page byte for byte", C.toStorage(r.markdown, r.macros, r.layout), RICH);
+  eq("untouched: Windows line endings in the file change nothing",
+     C.toStorage(r.markdown.replace(/\n/g, "\r\n"), r.macros, r.layout), RICH);
+
+  function edit(fn) { return C.toStorage(fn(r.markdown), r.macros, r.layout); }
+
+  const middle = edit(function (md) { return md.replace("Plain paragraph.", "Plain paragraph, edited."); });
+  has("edit in the middle: the edit landed", middle, "Plain paragraph, edited.");
+  has("edit in the middle: line break kept", middle, "<p>First line<br />second line</p>");
+  has("edit in the middle: colour and link classes kept", middle, 'rel="nofollow">linked</a>.</p>');
+  has("edit in the middle: entities kept as written", middle, "Closing &quot;quoted&quot; words.");
+  has("edit in the middle: macro kept", middle, INFO_MACRO);
+  ok("edit in the middle: old text gone", middle.indexOf("<p>Plain paragraph.</p>") === -1, middle);
+
+  const appended = edit(function (md) { return md + "\n\nA new closing paragraph."; });
+  ok("append: everything before is the original source", appended.indexOf(RICH.trimEnd()) === 0, appended.slice(0, 120));
+  has("append: new paragraph rendered", appended, "<p>A new closing paragraph.</p>");
+
+  const top = edit(function (md) { return "Inserted at the top.\n\n" + md; });
+  has("insert at top: rendered", top, "<p>Inserted at the top.</p>");
+  has("insert at top: the rest verbatim", top, "<p>First line<br />second line</p>");
+
+  const deleted = edit(function (md) { return md.replace("\n\nBetween rules.", ""); });
+  ok("delete: block gone", deleted.indexOf("Between rules.") === -1, deleted);
+  eq("delete: both rules still there", (deleted.match(/<hr \/>/g) || []).length, 2);
+  has("delete: neighbours verbatim", deleted, "<p>Plain paragraph.</p>");
+
+  /* A block that matches only as part of an edited paragraph must not be
+   * mistaken for the untouched original. */
+  const quoted = edit(function (md) { return md.replace("Plain paragraph.", "Plain paragraph. And more"); });
+  has("prefix edit: rendered as an edit", quoted, "Plain paragraph. And more");
+  ok("prefix edit: original not resurrected", quoted.indexOf("<p>Plain paragraph.</p>") === -1, quoted);
+
+  const swapped = edit(function (md) {
+    return md.replace("Plain paragraph.", "@@").replace("Between rules.", "Plain paragraph.").replace("@@", "Between rules.");
+  });
+  has("reordered: both texts present", swapped, "Between rules.");
+  has("reordered: both texts present (2)", swapped, "Plain paragraph.");
+  eq("reordered: nothing duplicated", (swapped.match(/Plain paragraph\./g) || []).length, 1);
+
+  eq("legacy copy without a layout still converts",
+     C.toStorage(r.markdown, r.macros).indexOf("<h1>Release notes</h1>"), 0);
+}
+
 /* ---------------- report ---------------- */
 console.log("");
 if (fails.length) {

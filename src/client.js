@@ -212,6 +212,8 @@ function createClient(session, options) {
       version: (data.version && data.version.number) || 0,
       markdown: converted.markdown,
       macros: converted.macros,
+      layout: converted.layout,
+      source: storage,
       url: base + "/pages/viewpage.action?pageId=" + pageId,
     };
   }
@@ -311,13 +313,16 @@ function createClient(session, options) {
     }
 
     const nextVersion = liveVersion + 1;
+    /* Untouched blocks go back as the source they came from; only edited
+     * ones are rendered. */
+    const storage = C.toStorage(markdown, macros, meta.layout);
 
     await api("PUT", "/rest/api/content/" + encodeURIComponent(pageId), {
       id: String(pageId),
       type: "page",
       title: live.title,
       space: { key: live.space && live.space.key },
-      body: { storage: { value: C.toStorage(markdown, macros), representation: "storage" } },
+      body: { storage: { value: storage, representation: "storage" } },
       version: { number: nextVersion, message: o.message || DEFAULT_VERSION_MESSAGE },
     });
 
@@ -328,6 +333,7 @@ function createClient(session, options) {
       toVersion: nextVersion,
       forcedOverStale: Boolean(o.force && meta.version != null && liveVersion > meta.version),
       removedMacros: lost.length,
+      storage: storage,
       url: base + "/pages/viewpage.action?pageId=" + pageId,
     };
   }
