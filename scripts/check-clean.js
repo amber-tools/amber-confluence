@@ -55,7 +55,8 @@ const RULES = [
     name: "external host",
     why: "a real installation address identifies whose wiki this came from",
     test: function (text) {
-      const m = text.match(/https?:\/\/([a-z0-9.-]+)/gi) || [];
+      /* A host starts with a letter or digit; "https://." in prose is not one. */
+      const m = text.match(/https?:\/\/[a-z0-9][a-z0-9.-]*/gi) || [];
       const bad = m
         .map(function (u) { return u.replace(/^https?:\/\//i, "").toLowerCase(); })
         .filter(function (h) {

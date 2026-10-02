@@ -15,6 +15,7 @@
 const config = require("../src/config.js");
 const { createClient } = require("../src/client.js");
 const { createStore } = require("../src/store.js");
+const { applyTrust } = require("../src/trust.js");
 
 /* Configuration is read on first use rather than at startup. A server
  * that exits during handshake tells the person nothing; a server that
@@ -23,6 +24,7 @@ let cached = null;
 function context() {
   if (!cached) {
     const session = config.load();
+    applyTrust({ caFile: session.caFile });
     cached = { session: session, client: createClient(session), store: createStore(session.pagesDir) };
   }
   return cached;

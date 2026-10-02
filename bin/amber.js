@@ -14,6 +14,7 @@
 const config = require("../src/config.js");
 const { createClient } = require("../src/client.js");
 const { createStore, digestOf } = require("../src/store.js");
+const { applyTrust } = require("../src/trust.js");
 
 const USAGE = [
   "amber — edit self-hosted Confluence pages as Markdown",
@@ -217,6 +218,7 @@ async function main() {
   let session;
   try {
     session = config.load();
+    applyTrust({ caFile: session.caFile });
   } catch (e) {
     fail(e.message);
   }

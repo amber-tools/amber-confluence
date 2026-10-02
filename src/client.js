@@ -10,6 +10,7 @@
 "use strict";
 
 const C = require("./converter.js");
+const { describeTlsError, tlsAdvice } = require("./trust.js");
 
 const DEFAULT_VERSION_MESSAGE = "Edited as Markdown with amber";
 
@@ -17,6 +18,31 @@ function createClient(session, options) {
   const opts = options || {};
   const doFetch = opts.fetch || globalThis.fetch;
   const base = session.baseUrl;
+
+  const timeoutMs = session.timeoutMs || 30000;
+  const sleep = opts.sleep || function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  /* How long a 429 or 503 asks us to wait. Retry-After is either seconds or
+   * an HTTP date; anything unreadable falls back to a short pause, and the
+   * wait is capped so a misconfigured proxy cannot stall a command for an
+   * hour. */
+  function retryDelay(res, attempt) {
+    const header = res.headers && res.headers.get ? res.headers.get("retry-after") : null;
+    let ms = NaN;
+    if (header) {
+      ms = /^\d+$/.test(header.trim()) ? Number(header) * 1000 : Date.parse(header) - Date.now();
+    }
+    if (!(ms >= 0)) ms = 1000 * Math.pow(2, attempt);
+    return Math.min(ms, 15000);
+  }
+
+  async function send(method, url, headers, payload) {
+    const init = { method: method, headers: headers, body: payload };
+    if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
+      init.signal = AbortSignal.timeout(timeoutMs);
+    }
+    return doFetch(url, init);
+  }
 
   async function api(method, urlPath, body) {
     const headers = session.headers(
@@ -28,23 +54,74 @@ function createClient(session, options) {
             "X-Atlassian-Token": "no-check",
           }
     );
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const host = new URL(base).host;
 
     let res;
-    try {
-      res = await doFetch(base + urlPath, {
-        method: method,
-        headers: headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch (e) {
-      throw new Error(
-        "Cannot reach " + new URL(base).host + ": " + e.message + "\n" +
-        "Check the URL, your VPN and whether this host is allowed to leave your network."
-      );
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await send(method, base + urlPath, headers, payload);
+      } catch (e) {
+        if (e && (e.name === "TimeoutError" || e.name === "AbortError")) {
+          throw new Error(
+            "No answer from " + host + " within " + Math.round(timeoutMs / 1000) + " s.\n" +
+            "The instance may be slow behind its proxy. Raise the limit with timeout = 120 in the config."
+          );
+        }
+        const tlsProblem = describeTlsError(e);
+        if (tlsProblem) throw new Error(tlsAdvice(tlsProblem));
+
+        const cause = e && e.cause && (e.cause.code || e.cause.message);
+        throw new Error(
+          "Cannot reach " + host + (cause ? " (" + cause + ")" : "") + ".\n" +
+          "Check the url in your config, your VPN, and whether this host is reachable from this machine."
+        );
+      }
+
+      /* Rate limits and brief unavailability are worth waiting out; a few
+       * attempts, then give up with the reason rather than a status code. */
+      if ((res.status === 429 || res.status === 503) && attempt < 3) {
+        const wait = retryDelay(res, attempt);
+        /* Drain the refused response first: an unread body keeps its
+         * connection busy, and the retry would queue behind it. */
+        try { await res.text(); } catch (e) { /* nothing to drain */ }
+        await sleep(wait);
+        continue;
+      }
+      break;
     }
 
     const text = await res.text();
 
+    /* A redirect to another scheme, host or port drops the Authorization
+     * header — fetch does that on purpose, so a credential never follows a
+     * redirect to a server it was not meant for. The request then arrives
+     * without it and Confluence answers 401, which would read as "your token
+     * is wrong" when the token is fine and the url is not. The usual case is
+     * http:// in the config for an instance that only serves https://. */
+    if (res.redirected && res.url) {
+      const from = new URL(base).origin;
+      const to = new URL(res.url).origin;
+      if (from !== to) {
+        const plainPath = urlPath.split("?")[0];
+        const cut = res.url.indexOf(plainPath);
+        const suggested = cut > 0 ? res.url.slice(0, cut) : to;
+        throw new Error(
+          base + " redirects to " + to + ", and credentials are not carried across a redirect,\n" +
+          "so Confluence received the request without them. Put the address it redirects to in your config:\n\n" +
+          '  url = "' + suggested + '"'
+        );
+      }
+    }
+
+    const denied = res.headers && res.headers.get ? res.headers.get("x-authentication-denied-reason") : null;
+
+    if (res.status === 401 && denied && /CAPTCHA/i.test(denied)) {
+      throw new Error(
+        "Confluence locked this account behind a CAPTCHA after too many failed sign-ins.\n" +
+        "Sign in once in the browser and solve it, then run the command again. Your credential is probably fine."
+      );
+    }
     if (res.status === 401) {
       throw new Error(
         session.auth.mode === "anonymous"
@@ -60,8 +137,22 @@ function createClient(session, options) {
     if (res.status === 404) {
       throw new Error("404: no page with this id. Check the page id or the URL you pasted.");
     }
+    if (res.status === 429 || res.status === 503) {
+      throw new Error(
+        res.status + ": " + host + " kept asking to slow down after several attempts. Try again in a minute."
+      );
+    }
     if (!res.ok) {
       throw new Error(res.status + " " + res.statusText + "\n" + text.slice(0, 800));
+    }
+
+    /* A write that was redirected may have been replayed against another
+     * address, or turned into a read. Say so instead of trusting it. */
+    if (res.redirected && method !== "GET") {
+      throw new Error(
+        "The " + method + " to " + host + " was redirected to " + res.url + ".\n" +
+        "Use that address as the url in your config, so writes go straight to it."
+      );
     }
 
     try {
@@ -69,8 +160,9 @@ function createClient(session, options) {
     } catch (e) {
       throw new Error(
         "Confluence returned HTML instead of JSON, which usually means a login page.\n" +
-        "Check the credential and whether the instance sits behind single sign-on.\n" +
-        text.slice(0, 300)
+        "If your company signs in through single sign-on, create a personal access token " +
+        "in Confluence and use it instead of a password: tokens are not redirected to the login page.\n" +
+        text.slice(0, 200)
       );
     }
   }

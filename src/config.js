@@ -165,6 +165,14 @@ function load(options) {
 
   const pagesDir = env.AMBER_PAGES_DIR || cf.pages_dir || path.join(os.homedir(), "amber", "pages");
 
+  /* Connection settings that differ between installations rather than
+   * between people: a company certificate authority, and how long a slow
+   * instance behind a proxy is allowed to take. */
+  const transport = {
+    caFile: env.AMBER_CA_FILE || cf.ca_file || null,
+    timeoutMs: Math.max(1, Number(env.AMBER_TIMEOUT || cf.timeout || 30)) * 1000,
+  };
+
   if (!baseUrl) {
     throw new Error(
       "No Confluence URL configured.\n" +
@@ -185,7 +193,7 @@ function load(options) {
    * better credential, and it needs no username. */
   const token = env.AMBER_CONFLUENCE_TOKEN || lookup(service + "-token", user) || "";
   if (token) {
-    return session(baseUrl, pagesDir, file, {
+    return session(baseUrl, pagesDir, file, transport, {
       mode: "token",
       header: "Bearer " + token,
       describe: "personal access token",
@@ -194,7 +202,7 @@ function load(options) {
 
   const password = env.AMBER_CONFLUENCE_PASSWORD || (user ? lookup(service, user) : null) || "";
   if (user && password) {
-    return session(baseUrl, pagesDir, file, {
+    return session(baseUrl, pagesDir, file, transport, {
       mode: "basic",
       header: "Basic " + Buffer.from(user + ":" + password).toString("base64"),
       describe: "username and password",
@@ -214,18 +222,20 @@ function load(options) {
 
   /* Some instances serve pages anonymously. Sending no Authorization at
    * all is both simpler and safer than sending an empty one. */
-  return session(baseUrl, pagesDir, file, {
+  return session(baseUrl, pagesDir, file, transport, {
     mode: "anonymous",
     header: null,
     describe: "anonymous access",
   });
 }
 
-function session(baseUrl, pagesDir, file, auth) {
+function session(baseUrl, pagesDir, file, transport, auth) {
   return {
     baseUrl: baseUrl,
     pagesDir: pagesDir,
     configFile: file,
+    caFile: transport.caFile,
+    timeoutMs: transport.timeoutMs,
     auth: auth,
     /* Headers for an API call. Never logged: callers print auth.describe. */
     headers: function (extra) {
