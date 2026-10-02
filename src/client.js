@@ -11,6 +11,7 @@
 
 const C = require("./converter.js");
 const { describeTlsError, tlsAdvice } = require("./trust.js");
+const { digestOf } = require("./store.js");
 
 const DEFAULT_VERSION_MESSAGE = "Edited as Markdown with amber";
 
@@ -44,7 +45,10 @@ function createClient(session, options) {
     return doFetch(url, init);
   }
 
-  async function api(method, urlPath, body) {
+  /* Transport only: retries, timeouts, certificates and redirects. Returns
+   * the response and its text whatever the status, so a caller that wants
+   * to look at a 401 or a 404 itself — the doctor does — can. */
+  async function request(method, urlPath, body) {
     const headers = session.headers(
       body === undefined
         ? {}
@@ -113,6 +117,15 @@ function createClient(session, options) {
         );
       }
     }
+
+    return { res: res, text: text };
+  }
+
+  async function api(method, urlPath, body) {
+    const host = new URL(base).host;
+    const answer = await request(method, urlPath, body);
+    const res = answer.res;
+    const text = answer.text;
 
     const denied = res.headers && res.headers.get ? res.headers.get("x-authentication-denied-reason") : null;
 
@@ -244,6 +257,27 @@ function createClient(session, options) {
       throw new Error("No local copy of page " + pageId + ". Pull it first.");
     }
 
+    /* Nothing edited, nothing sent. Converting an untouched page back is not
+     * guaranteed to reproduce it character for character, so publishing it
+     * would add a version to the page history for no reason and could alter
+     * markup nobody meant to touch. */
+    /* Editors add a final newline on save, and Windows ones may switch line
+     * endings; neither is an edit. */
+    const canonical = markdown.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+    if (meta.digest && !o.force &&
+        (digestOf(markdown) === meta.digest || digestOf(canonical) === meta.digest)) {
+      return {
+        pageId: pageId,
+        title: meta.title,
+        unchanged: true,
+        fromVersion: meta.version,
+        toVersion: meta.version,
+        removedMacros: 0,
+        forcedOverStale: false,
+        url: base + "/pages/viewpage.action?pageId=" + pageId,
+      };
+    }
+
     const macros = meta.macros || [];
     const lost = C.missingMacros(markdown, macros);
     if (lost.length && !o.force) {
@@ -298,7 +332,7 @@ function createClient(session, options) {
     };
   }
 
-  return { api: api, pull: pull, push: push, status: status, pageIdFrom: pageIdFrom };
+  return { api: api, request: request, pull: pull, push: push, status: status, pageIdFrom: pageIdFrom };
 }
 
 module.exports = { createClient, DEFAULT_VERSION_MESSAGE };

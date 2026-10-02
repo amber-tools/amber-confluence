@@ -72,6 +72,10 @@ async function toolPush(args) {
     message: args.message,
   });
 
+  if (result.unchanged) {
+    return "Nothing to publish: the Markdown is unchanged since the pull, so no new version was created.";
+  }
+
   store.save({
     pageId: pageId,
     title: result.title,

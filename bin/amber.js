@@ -15,6 +15,7 @@ const config = require("../src/config.js");
 const { createClient } = require("../src/client.js");
 const { createStore, digestOf } = require("../src/store.js");
 const { applyTrust } = require("../src/trust.js");
+const doctor = require("../src/doctor.js");
 
 const USAGE = [
   "amber — edit self-hosted Confluence pages as Markdown",
@@ -23,11 +24,13 @@ const USAGE = [
   "  amber confluence diff <page>              show what push would change",
   '  amber confluence push <page> [-m "why"]   publish the edited Markdown',
   "  amber confluence status [page]            compare local copies with the server",
+  "  amber confluence doctor [page]            check that everything works here, without writing",
   "",
   "Options",
   "  -m, --message <text>   version comment shown in the page history",
   "      --force            publish despite a refusal (see below)",
   "      --json             machine-readable output",
+  "      --share            doctor only: a report safe to paste publicly",
   "",
   "Push refuses, and only --force overrides, when:",
   "  - the page changed on the server after you pulled it",
@@ -49,6 +52,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--force") out.force = true;
     else if (a === "--json") out.json = true;
+    else if (a === "--share") out.share = true;
     else if (a === "-m" || a === "--message") out.message = argv[++i];
     else if (a === "-h" || a === "--help") out.help = true;
     else out.rest.push(a);
@@ -208,8 +212,20 @@ async function main() {
   if (group !== "confluence") {
     fail('Unknown command group "' + group + '". The only group today is: confluence');
   }
-  if (["pull", "push", "diff", "status"].indexOf(command) === -1) {
-    fail('Unknown command "' + (command || "") + '". Try: pull, push, diff, status');
+  if (["pull", "push", "diff", "status", "doctor"].indexOf(command) === -1) {
+    fail('Unknown command "' + (command || "") + '". Try: pull, push, diff, status, doctor');
+  }
+
+  /* The doctor reports a broken configuration rather than failing on it,
+   * so it runs before the configuration is loaded. */
+  if (command === "doctor") {
+    const report = await doctor.runDoctor({
+      loadSession: function () { return config.load(); },
+      pageRef: pageRef,
+    });
+    if (args.json) console.log(JSON.stringify(report, null, 2));
+    else console.log(doctor.render(report, args.share));
+    process.exit(doctor.exitCode(report));
   }
   if (!pageRef && command !== "status") {
     fail("Which page? Pass a page id or a Confluence URL.");
@@ -300,6 +316,11 @@ async function main() {
      * can tell them apart from a broken run. */
     if (e.code === "STALE" || e.code === "MACROS_MISSING") fail(e.message, 2);
     throw e;
+  }
+
+  if (result.unchanged) {
+    if (args.json) return console.log(JSON.stringify(result));
+    return console.log("Nothing to publish: " + (result.title || "the page") + " is unchanged since the pull (v" + result.fromVersion + ").");
   }
 
   store.save({

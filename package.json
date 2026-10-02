@@ -24,7 +24,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/converter.test.js && node test/roundtrip.test.js && node test/config.test.js && node test/client.test.js && node test/store.test.js && node test/diff.test.js && node test/quirks.test.js && node test/mcp.test.js && node scripts/check-clean.js",
+    "test": "node test/converter.test.js && node test/roundtrip.test.js && node test/config.test.js && node test/client.test.js && node test/store.test.js && node test/diff.test.js && node test/quirks.test.js && node test/doctor.test.js && node test/mcp.test.js && node scripts/check-clean.js",
     "check": "node scripts/check-clean.js"
   },
   "engines": {

@@ -67,7 +67,7 @@ function createFakeConfluence(options) {
   }
 
   function handle(req, res, raw) {
-    const url = new URL(req.url, "http://fake");
+    const url = new URL(req.url, "http://localhost");
     requests.push({
       method: req.method,
       path: url.pathname,

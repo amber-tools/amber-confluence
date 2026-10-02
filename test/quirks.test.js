@@ -100,7 +100,7 @@ async function withFake(options, body) {
     const client = createClient(sessionFor(fake.url));
     eq("localised instance: round trip succeeds", await roundTrip(fake, client), null);
     let msg = null;
-    try { await client.pull("999999999"); } catch (e) { msg = e.message; }
+    try { await client.pull("100000099"); } catch (e) { msg = e.message; }
     ok("localised 404 is explained from the status, not the wording",
        msg && msg.indexOf("no page with this id") !== -1, msg);
   });

@@ -240,6 +240,43 @@ function meta(version, macros) {
       "wiki.example.com");
   }
 
+  /* ---------------- 11. nothing edited, nothing sent ---------------- */
+  {
+    const { digestOf } = require("../src/store.js");
+    const f = fakeFetch([{ body: PAGE }]);
+    const c = createClient(session(), { fetch: f });
+    const pulled = await c.pull("100000001");
+    const m = { pageId: "100000001", version: 12, macros: pulled.macros, digest: digestOf(pulled.markdown) };
+
+    const same = await c.push("100000001", m, pulled.markdown);
+    eq("unchanged: reported as such", same.unchanged, true);
+    eq("unchanged: version not advanced", same.toVersion, 12);
+
+    const editorSaved = await c.push("100000001", m, pulled.markdown + "\n");
+    eq("unchanged: a final newline from the editor is not an edit", editorSaved.unchanged, true);
+
+    const windows = await c.push("100000001", m, pulled.markdown.replace(/\n/g, "\r\n") + "\r\n");
+    eq("unchanged: Windows line endings are not an edit", windows.unchanged, true);
+
+    eq("unchanged: not a single write was sent",
+       f.calls.filter(function (x) { return x.method !== "GET"; }).length, 0);
+    eq("unchanged: not even a version check", f.calls.length, 1);
+  }
+
+  {
+    const { digestOf } = require("../src/store.js");
+    const live = { title: "Onboarding", space: { key: "DEMO" },
+      version: { number: 12, by: { displayName: "John Doe" }, when: "2026-09-20T09:00:00Z" } };
+    const f = fakeFetch([{ body: PAGE }, { body: live }, { body: {} }]);
+    const c = createClient(session(), { fetch: f });
+    const pulled = await c.pull("100000001");
+    const m = { pageId: "100000001", version: 12, macros: pulled.macros, digest: digestOf(pulled.markdown) };
+
+    const forced = await c.push("100000001", m, pulled.markdown, { force: true });
+    ok("unchanged with force: published anyway", !forced.unchanged, JSON.stringify(forced));
+    eq("unchanged with force: one write", f.calls.filter(function (x) { return x.method === "PUT"; }).length, 1);
+  }
+
   /* ---------------- report ---------------- */
   console.log("");
   if (fails.length) {
