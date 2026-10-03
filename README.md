@@ -254,8 +254,9 @@ never answers, and error messages in another language. Each of these failed or
 misled before it was fixed, and each is now a test.
 
 Not tested yet: publishing to a real instance, Confluence 7.x and 8.x on real
-servers, and Windows. If you run any of these, `amber confluence doctor --share`
-is the most useful thing you can send.
+servers, and Windows. If you run any of these, [TESTING.md](TESTING.md) is a
+twenty-minute walk-through that only touches a copy you make yourself, and
+[docs/compatibility.md](docs/compatibility.md) lists every reported run.
 
 ## What it cannot do yet
 
